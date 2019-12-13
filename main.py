@@ -10,6 +10,9 @@ import os
 import matplotlib.pyplot as plt
 import numpy as np
 from sklearn.cluster import MiniBatchKMeans
+from pythonRLSA import rlsa
+import PIL.Image
+import pillowfight
 
 #Para que o Tesseract Funcione
 pyt.pytesseract.tesseract_cmd = 'C:\\Program Files (x86)\\Tesseract-OCR\\tesseract.exe'
@@ -17,120 +20,18 @@ pyt.pytesseract.tesseract_cmd = 'C:\\Program Files (x86)\\Tesseract-OCR\\tessera
 # Le Imagem RGB e PB. Recebe Caminho e retorna 2 matrizes (1 para RGB ImgRGB e outra Cinza ImgPB)
 def LeImg(Img):
     ImgRGB = cv2.imread(Img)
-    #ImgPB = cv2.imread(Img, 0)
     ImgPB = cv2.cvtColor(ImgRGB, cv2.COLOR_BGR2GRAY)
     return ImgRGB, ImgPB
 
-###### FUNÇÃO PYTESSERACT DO GOOGLE PARA RECONHECIMENTO AUTOMÁTICO DE CARACTERES
-#Recebe Imagem lida (RGB ou PB) e retorna Texto da Imagem
-def Tesseract(Img):
-    # salva a imagem em um arquivo temporário do Windows para aplicar OCR
-    filenameImagem = "{}.jpg".format(os.getpid())
-    cv2.imwrite(filenameImagem, Img)
-    # carrega a imagem usando a biblioteca PIL/Pillow e aplica OCR
-    texto = pyt.image_to_string(Image.open(filenameImagem))
-    # deleta arquivo temporário
-    os.remove(filenameImagem)
-    #print("Texto: " + texto)
-    return texto
+#Filtro Mediana para suavizar ruidos - melhor pq mantem as bordas agudas / nitidez das bordas
+#Recebe uma imagem e devolve a mesma imagem com a suavização
+def Mediana(Img):
+    Img = cv2.medianBlur(Img, 3)
+    return Img
 
-#Qantização. Recebe a Imagem (RGB ou PB) e a quantidade de clusteres a serem usados.
-#Retorna a Imagem Quantizada e os valores de cada cluster escolhido
-def Quantizacao(Img, clusters):
-    (h, w) = Img.shape[:2]
-    # convert the image from the RGB color space to the L*a*b* color space -- since we will be clustering using k-means
-    # which is based on the euclidean distance, we'll use the L*a*b* color space where the euclidean distance implies perceptual meaning
-    Img = cv2.cvtColor(Img, cv2.COLOR_BGR2LAB)
-    # reshape the image into a feature vector so that k-means can be applied
-    Img = Img.reshape((Img.shape[0] * Img.shape[1], 3))
-    # apply k-means using the specified number of clusters and then create the quantized image based on the predictions
-    clt = MiniBatchKMeans(n_clusters=clusters)
-    labels = clt.fit_predict(Img)
-    quant = clt.cluster_centers_.astype("uint8")[labels]
-    # reshape the feature vectors to images
-    quant = quant.reshape((h, w, 3))
-    Img = Img.reshape((h, w, 3))
-    # convert from L*a*b* to RGB
-    quant = cv2.cvtColor(quant, cv2.COLOR_LAB2BGR)
-    Img = cv2.cvtColor(Img, cv2.COLOR_LAB2BGR)
-    # display the images and wait for a keypress
-    #cv2.imshow("image", np.hstack([Img, quant]))
-    #cv2.waitKey(0)
-    return quant, clt
+#Detector de Bordas (Prewitt, Sobel e Canny)
 
-#Calcula Histograma da Imagem Colorida
-def RGBHistograma(Img):
-    color = ('b', 'g', 'r')
-    for i, col in enumerate(color):
-        histr = cv2.calcHist([Img], [i], None, [256], [0, 256])
-        plt.plot(histr, color=col)
-        plt.xlim([0, 256])
-    plt.show()
-
-#Histograma da Imagem Cinza
-def PBHistograma(Img):
-    histr = plt.hist(Img.ravel(), 256, [0, 256]);
-    plt.show()
-
-#Não funciona hauhuahauha
-def LiuEdgeDetection(Img):
-    #DV = (dx dy) Jc.t
-    #Matriz Jacobiana [[drdx, dr/dy], [dg/dx, dg/dy], [db/dx, db, dy]] --> Derivadas de primeira ordem dos 3 canais de cor
-    #magnitude de DV --> distância euclidiana: DV² = (dx dy) Mc (dx dy).t
-    #onde, Mc = Jc.t * Jc = [[Mxx, Mxy],[Mxy, Myy]]
-        #Mxx = rx² + gx² + bx²
-        #Mxy = rxry + gxgy + bxby
-        #Myy = ry² + gy² + by²
-    #DV² é a taxa de mudança da imagem da direção dx, dy
-    #AutoValor de Mc --> V = ( sqrt( (Mxx + Myy)² - (4 * (Mxx * Myy - Myy²))) + Mxx + Myy) / 2
-    #AutoVetor de Mc --> {Mxy - V - Mxx}
-    #Direção do Gradiente: Teta = arctan((V-Mxx)/Mxy)
-    #Gradiente Magnitude: V(i,j)
-    #Gadiente Direction: Teta(i, j)
-    altura = Img.shape[0]
-    largura = Img.shape[1]
-    GradienteMag, GradienteDir = np.zeros([altura, largura]), np.zeros([altura, largura])
-    M, Mc = [], []
-    #1º Passo: Calcular os Ms: Mxx, Myy, Mxy
-    for x in range(0, altura):
-        for y in range(0, largura):
-            Mxx = Img[x, :, 0]**2 + Img[x, :, 1]**2 + Img[x, :, 2]**2
-            Mxy = Img[x, :, 0]*Img[:, y, 0] + Img[x, :, 1]*Img[:, y, 1] + Img[x, :, 2]*Img[:, y, 2]
-            Myy = Img[:, y, 0]**2 + Img[:, y, 1]**2 + Img[:, y, 2]**2
-            M.append([x, y, Mxx, Mxy, Myy])
-            Mc.append([[Mxx, Mxy],[Mxy, Myy]])
-            GradienteMag[x][y] = (np.sqrt((Mxx + Myy) ** 2 - (4 * (Mxx * Myy - Myy ** 2))) + Mxx + Myy) / 2
-            GradienteDir[x][y] = np.arctan((-Mxx)/Mxy)
-    print ("ok")
-    cv2.imshow("Mag", GradienteMag)
-    cv2.imshow("Dir", GradienteDir)
-    cv2.waitKey(0)
-
-#Bordas com Derivadas de Laplace
-def Laplace(Img):
-    lap = cv2.Laplacian(Img, cv2.CV_64F, ksize=1)
-    lap = np.uint8(abs(lap))
-    return lap
-
-def Canny(Img, sigma=0.33):
-    #1- Redução de Ruído #2 - Calculo do Gradiente; 3 - Supressão de Não Máximos; 4 - Limiar Duplo; 5 - Detecção de Bordas por Hysteresis
-    #Calculo de limiares
-    v = np.median(Img)
-    limiar1 = int(max(0, (1.0 - sigma) * v))
-    limiar2 = int(min(255, (1.0 + sigma) * v))
-    print("Limiares do Canny: ", limiar1, limiar2)
-    #Aplica a detecção de bordas canny do openv
-    canny = cv2.Canny(Img, limiar1, limiar2)
-    return canny
-
-#Bordas com Derivadas de Sobel
-def Sobel(Img):
-    sobelx = cv2.Sobel(Img, cv2.CV_64F, 1, 0)
-    sobely = cv2.Sobel(Img, cv2.CV_64F, 0, 1)
-    sobelx = np.uint8(abs(sobelx))
-    sobely = np.uint8(abs(sobely))
-    return sobelx, sobely
-
+#Prewitt: Aplica Máscaras H e V na Imagem de entrada e as retorna
 def Prewitt(Img):
     # Delimita áreas de variação abruptas de intensidade
     # Aplica Filtros derivativos de Prewitt
@@ -140,192 +41,441 @@ def Prewitt(Img):
     ImgPrewittV = cv2.filter2D(Img, -1, PrewittV)
     return ImgPrewittH, ImgPrewittV
 
-#Baseado em Liu et al e Dissertação Unicamp
-def LiuLocalization(ImgX, ImgY):
-    altura = ImgX.shape[0]
-    largura = ImgX.shape[1]
-    Gmag, Gteta = np.zeros([altura, largura, 3]), np.zeros([altura, largura, 3])
-    # Gradiente da intensidade da imagem por meio dos filtros derivativos Hh e Hv de prewitt
-    #Gradiente da Imagem Original = [ImgPrewittH / ImgPrewittV]
-    if len(ImgX.shape) > 2:
-        profundidade = ImgX.shape[2]
-        for cor in range (0, profundidade):
-            for x in range (0, altura):
-                for y in range (0, largura):
-                    Gmag[x, y, cor] = np.sqrt((ImgX[x, y, cor]**2) + (ImgY[x, y, cor]**2))
-                    if ImgX[x, y, cor] == 0: ImgX[x, y, cor] = 1
-                    Gteta[x, y, cor] = np.arctan(ImgY[x, y, cor]/ImgX[x, y, cor])
-    else: #imagens PB
-        for x in range(0, altura):
-            for y in range(0, largura):
-                Gmag[x, y] = np.sqrt((ImgX[x, y] ** 2) + (ImgY[x, y] ** 2))
-                if ImgX[x, y] == 0: ImgX[x, y] = 1
-                Gteta[x, y] = np.arctan(ImgY[x, y] / ImgX[x, y])
+#Prewitt: Aplica técnica de sobel do cv2 para x e y na Imagem de entrada e as retorna
+def Sobel(Img):
+    print("Aplicando Filros de Sobel para X e Y - Magnitude do Gradiente (43)")
+    SobelX = cv2.Sobel(Img, cv2.CV_64F, 1, 0)
+    SobelY = cv2.Sobel(Img, cv2.CV_64F, 0, 1)
+    SobelX = np.uint8(abs(SobelX))
+    SobelY = np.uint8(abs(SobelY))
+    return SobelX, SobelY
 
-    return Gmag, Gteta
+def Canny(Img, Mag, sigma=0.3):
+    print("Aplicando Detecção de Bordas Canny (Suavização com Gauss, Filtro de Sobel, Supressão de Não Máximos e Treshold (51)")
+    v = np.mean(Mag)
+    limiar1 = 150 #int(max(0, (1.0 - sigma) * v))
+    limiar2 = 200 #int(min(255, (1.0 + sigma) * v))
+    # Aplica a detecção de bordas canny do openv
+    Canny = cv2.Canny(Img, limiar1, limiar2)
+    return Canny
 
-def LiuLocalization2(ImgPrewittH, ImgPrewittV, Gmag, Gteta):
-    #Um pixel de borda é aceito como pixel de borda de um texto quando atende as seguintes condições:
-    #A magnitude do gradiente do pixel (i,j) deve ser maior do que a magnitude de ambos os pixels da Vizinhança de 8
-    #Vizinhança direta? (i', j') e vizinhança diagonal (i'', j'')
-    #relacionados à direção do gradiente do pixel. Assim: Gmg[x][y] > Gmag[x'][y'] e Gmg[x][y] > Gmag[x''][y'']
-    #Os dois pixels da vizinhança de 8, cuja magnitue do grandiente é coparada ao pixel i,j são definidos de acordo com o ângulo o gradiente do pixel sob avaliação.
-    #Olho para o angulo e comparo com os vizinhos do angulo (sempre em par, x'y' e x''y''
-    #se o angulo é 90, os vizinhos estarão diretamente acima e abaixo. São 4 casos possíveis
-    #Se a Magnitude do PI for maior que a magnitude dos dois vizinhos, ele é um candidato a bordas textuais
-    #Isso pq se espera que as bordas de texto tenham maior magnitude que as demais bordas
-    pass
+def MagStrength(ImgX, ImgY):
+    print("Cálculo da força da Magnitude do Gradiente através da 2ª derivada dos filtros aplicados")
+    ImgMag = np.zeros([ImgX.shape[0], ImgX.shape[1]])
+    for x in range(ImgX.shape[0]):
+        for y in range(ImgX.shape[1]):
+            ImgMag[x, y] = np.sqrt(ImgX[x, y]**2 + ImgY[x, y]**2)
+    return ImgMag
 
-def Gaussiana(Img):
-    Img = cv2.GaussianBlur(Img, (3, 3), 0)
-    return Img
+#Calcula direção do gradiente, considerando Bordas de X e Y resultantes das detecção de bordas escolhida #GTeta(i,j) = arctan(Gy(i,j)/Gx(i,j))
+def Teta(ImgX, ImgY):
+    print("Cálculo da direção do Gradiente em Graus (0 a 90)")
+    ImgTeta = np.zeros([ImgX.shape[0], ImgX.shape[1]])
+    for x in range(ImgX.shape[0]):
+        for y in range(ImgX.shape[1]):
+            if ImgX[x,y] != 0:
+                ImgTeta[x, y] = np.arctan(ImgY[x,y] / ImgX[x,y])
+            else:
+                ImgTeta[x, y] = 0.0
+            ImgTeta[x, y] = ImgTeta[x, y] * (180/np.pi)
+    return ImgTeta
 
-def Mediana(Img):
-    Img = cv2.medianBlur(Img, 9)
-    return Img
+def MostraImg(texto, Img):
+    cv2.imshow(texto, Img)
+    cv2.waitKey(0)
 
-#Plota Imagens na janela do matplotlib
-def PlotaImg(imagens, titulos):
-    for i in range(0, len(imagens)-1):
-        plt.subplot(5, 6, i+1), plt.imshow(imagens[i][1], "gray")
-        plt.title(titulos[i][0])
-        #plt.plot()
-        plt.xticks([]), plt.yticks([])
-    plt.show()
+def ConnectedComponents(Img):
+    ImgCC = cv2.threshold(Img, 127, 255, cv2.THRESH_BINARY)[1]  # ensure binary
+    ret, ImgCC = cv2.connectedComponents(ImgCC)
+    MakeVisible(ImgCC)
+    return ImgCC
 
-def PlotaImgS(imagens, titulo):
-    for i in range(0, len(imagens)-1):
-        imagem = cv2.resize(imagens[i][1], None, fx=0.8, fy=0.8, interpolation=cv2.INTER_CUBIC)
-        cv2.imwrite("Resultados\\" + imgs[op] + imagens[i][0] + ".jpg", imagem)
-        cv2.imshow(imagens[i][0], imagem)
-        cv2.waitKey(0)
+def ConnectedComponentsStats(Img):
+    print("Cálculo dos Componentes Conectados com suas estatísticas possíveis (Top, Left, Height e Width + Pixels de borda/Área (151)")
+    ImgCC = cv2.threshold(Img, 127, 255, cv2.THRESH_BINARY)[1]  # ensure binary
+    nlabels, ImgCC, stats, centroids = cv2.connectedComponentsWithStats(ImgCC)
+    # stats[0], centroids[0] are for the background label. ignore
+    #lblareas = stats[1:, cv2.CC_STAT_AREA] #Recebe a informação de área de cada componente (exceto fundo)
+    #ave = np.average(centroids[1:], axis=0, weights=lblareas) #tupla de médias dos centroids com os pesos das áreas não sei pra que serve
+    ImgCC = ImgCC.astype(np.uint8)
+    #MostraImg("ConnectedComponentsStats em RGB", MakeVisible(ImgCC))
+    #imax = max(enumerate(lblareas), key=(lambda x: x[1]))[0] +
+    print("Total de Componentes: ", nlabels)
+    return ImgCC, stats, centroids, nlabels
 
-    cv2.destroyAllWindows()
+def CriaBoundingBoxes(stats, ImgRGB):
+    print("Desenha os Bounding Boxes para cada Componente Conectado (163)")
+    ImgRGBCopy = ImgRGB.copy()
+    ImgBB = np.zeros([ImgRGB.shape[0], ImgRGB.shape[1]])
+    for c in stats[1:, :4]:
+        P1 = (c[cv2.CC_STAT_LEFT], c[cv2.CC_STAT_TOP])
+        P2 = (c[cv2.CC_STAT_LEFT] + c[cv2.CC_STAT_WIDTH], (c[cv2.CC_STAT_TOP] + c[cv2.CC_STAT_HEIGHT]))
 
-######  MAIN  #####
-Imagens = []
-imgs = [
-    "12YearsAsSlave", "BlackPanther", "CitizenKane", "EdAstra", "Frankie", "GeminiMan", "Hustlers", "It", "Jexi",
-    "Joker", "Judy", "MadMax", "Spotlight", "StarWars", "Synonyms", "The GoodFather", "TheCurrentWar", "WakingWaves", "WonderWoman"]
-op = 15
+        # desenha retângulos em torno do componente
+        cv2.rectangle(ImgRGBCopy, P1, P2, (0, 255, 0), thickness = 2) #Apenas para Visualização
+        cv2.rectangle(ImgBB, P1, P2, (255), thickness=2) #Contém apenas os retângulos
+
+    #MostraImg("ImgRGB", ImgRGBCopy) #Apenas para Vizualização: Img Colorida com os retângulos em verde
+    print("Total de Bounding Boxes: ", stats.shape[0])
+    return ImgRGBCopy
+
+def MakeVisible(Img):
+    # Map component labels to hue val
+    label_hue = np.uint8(179 * Img / np.max(Img))
+    blank_ch = 255 * np.ones_like(label_hue)
+    labeled_img = cv2.merge([label_hue, blank_ch, blank_ch])
+    # cvt to BGR for display
+    labeled_img = cv2.cvtColor(labeled_img, cv2.COLOR_HSV2BGR)
+    # set bg label to black
+    labeled_img[label_hue == 0] = 0
+    cv2.imwrite(str(path+ imagem + " - 0ComponentesConectados" + extensao), labeled_img)
+    return labeled_img
+
+def BBAreasSelection(stats, ImgRGB):
+    print("Seleção para inclusão ou exclusão de cada Componente Conectado de acordo com a Área do Bounding Box (190)")
+    #Area minima: cada BB tem que ter pelo menos 20 pixels
+    NovoStats = []; NovoStats.append(stats[0])
+    AlturaImg = stats[0,3]; LarguraImg = stats[0,2]; AreaImg = AlturaImg*LarguraImg; MediaArea = np.mean(stats[1:, cv2.CC_STAT_HEIGHT] * stats[1:, cv2.CC_STAT_WIDTH])
+    AlturaMedia = np.mean(stats[1:, cv2.CC_STAT_HEIGHT]); LarguraMedia = np.mean(stats[1:, cv2.CC_STAT_WIDTH])
+    for i, CC in enumerate(stats[1:], start=1):
+        Flag1 = False; Flag2 = False; Flag3 = False; Flag4 = False; Flag5 = False;
+        AreaCC = CC[cv2.CC_STAT_HEIGHT] * CC[cv2.CC_STAT_WIDTH]
+        DensityCC = CC[cv2.CC_STAT_AREA]; AspectRatio = CC[cv2.CC_STAT_WIDTH]/CC[cv2.CC_STAT_HEIGHT] ; Extent = AreaCC/DensityCC
+        if DensityCC > 15 or AreaCC > 30: #Area do BB #Desidade dos pixels BB > 10 pixels E
+            Flag1 = True
+        if AreaCC < AreaImg*0.4: #Area Total BB < 40% da Img
+            Flag2 = True
+        if CC[cv2.CC_STAT_HEIGHT] <= AlturaImg*0.6 and CC[cv2.CC_STAT_WIDTH] <= LarguraImg*0.6: #Altura e largura do BB < 60% da altura e largura da Img
+            Flag3 = True
+        if CC[cv2.CC_STAT_HEIGHT] < 200 and CC[cv2.CC_STAT_WIDTH] < 150: #Tamanho máximo do BB 200H x 150W
+            Flag4 = True
+        #if AspectRatio > 0.2 and AspectRatio < 10.0: #Proporção de 0.5 a 10, priorizando retângulos "em pé"
+        #    Flag5 = True
+        if Flag1 == True and Flag2 == True and Flag3 == True and Flag4 == True:
+            NovoStats.append(CC)
+        #print("CC, Linha, Coluna, Altura, Largura, Extent, Density, Area, Ratio: \n",
+        #      i, CC[cv2.CC_STAT_TOP], CC[cv2.CC_STAT_LEFT], CC[cv2.CC_STAT_HEIGHT], CC[cv2.CC_STAT_WIDTH],
+        #      Extent, DensityCC, AreaCC, AspectRatio)
+    NovoStats = np.asarray(NovoStats)
+    ImgRGBCopy = CriaBoundingBoxes(NovoStats, ImgRGB)
+    return NovoStats, ImgRGBCopy
+
+def BBGradientSelection(stats, ImgRGB, ImgMag, ImgTeta, ImgCC):
+    print("Seleção para inclusão ou exclusão de cada Componente Conectado de acordo com as informações da Magnitude e Direção do Gradiente (207)")
+    NovoStats = []; MediaMag = 0;
+    TreshAngle = 85 #De acordo com Liu
+    NovoStats.append(stats[0])
+    for i, CC in enumerate(stats[1:], start=1):
+        Flag1 = False; Flag2 = False; Flag3 = False
+        XMin = CC[cv2.CC_STAT_TOP]; XMax = CC[cv2.CC_STAT_TOP] + CC[cv2.CC_STAT_HEIGHT] #I inicial e final do BB
+        YMin = CC[cv2.CC_STAT_LEFT]; YMax = CC[cv2.CC_STAT_LEFT] + CC[cv2.CC_STAT_WIDTH] #J inicial e final do BB
+        TreshMag = LimiarM(ImgMag, ImgTeta, XMin, XMax, YMin, YMax)
+        #Componente = np.min(ImgCC[XMin:XMax, YMin:YMax][np.nonzero(ImgCC[XMin:XMax, YMin:YMax])])
+        for x in range (XMin, XMax):
+            for y in range (YMin, YMax):
+                #Media da Magnitude do gradiente dos pixels de contorno
+                if ImgCC[x, y] != 0 and ImgMag[x, y] > 0: #Se for um pixel de borda e sua magnitude for > 0
+                    MediaMag = (MediaMag + ImgMag[x, y])/CC[cv2.CC_STAT_AREA]
+        #if MediaMag < TreshMag:
+        #    Flag1 = True
+        #Variação do Teta
+        dif = np.max(ImgTeta[XMin:XMax, YMin:YMax]) - np.min(ImgTeta[XMin:XMax, YMin:YMax])
+        if dif > TreshAngle:
+            Flag2 = True
+        #Count dos pixels de borda
+        if CC[cv2.CC_STAT_AREA] > max(2 * CC[cv2.CC_STAT_HEIGHT], 2 * CC[cv2.CC_STAT_WIDTH]):
+            Flag3 = True
+        if Flag2 == True and Flag3 == True:
+            NovoStats.append(CC)
+        print("Componente: ", i, "; X: ", XMin, "; Y: ", YMin, "-> TresholdMag: ", TreshMag, "; MediaMag: ", MediaMag, "; TreshAngle: ", TreshAngle,
+              "; DiferençaAngulo", dif, "; TreshDensity: ", max(2 * CC[cv2.CC_STAT_HEIGHT], 2 * CC[cv2.CC_STAT_WIDTH]),
+              "; Densidade: ", CC[cv2.CC_STAT_AREA])
+        print("Flag1 = ", Flag1, "; Flag2 = ", Flag2, "; Flag3 = ", Flag3)
+    NovoStats = np.asarray(NovoStats)
+    ImgRGBCopy = CriaBoundingBoxes(NovoStats, ImgRGB)
+    return NovoStats, ImgRGBCopy
+
+def LimiarM(ImgMag, ImgTeta, XMin, XMax, YMin, YMax):
+    sum1 = 0; sum2 = 1
+    if YMax == ImgMag.shape[1]:
+        YMax = YMax-1
+    if XMax == ImgMag.shape[0]:
+        XMax = XMax-1
+    for x in range (XMin, XMax):
+        for y in range (YMin, YMax):
+            MagPI = ImgMag[x, y]
+            TetaPI = ImgTeta[x, y]
+            if (TetaPI > 337.5 or TetaPI < 22.5) or (TetaPI > 157.5 and TetaPI < 202.5):  # Angulos próximos a 0 ou próximos a 180 - direita e esquerda
+                Viz1 = ImgMag[x, y + 1]
+                Viz2 = ImgMag[x, y - 1]
+            elif (TetaPI > 22.5 and TetaPI < 67.5) or (TetaPI > 202.5 and TetaPI < 247.5):  # Angulos próximos a 45 ou próximos a 225 - diagonal superior direita e diagonal inferior esquerda
+                Viz1 = ImgMag[x - 1, y + 1]
+                Viz2 = ImgMag[x + 1, y - 1]
+            elif (TetaPI > 67.5 and TetaPI < 112.5) or (TetaPI > 247.5 and TetaPI < 292.5):  # Angulos próximos a 90 ou próximos a 270 - Acima e Abaixo
+                Viz1 = ImgMag[x - 1, y]
+                Viz2 = ImgMag[x + 1, y]
+            elif (TetaPI > 112.5 and TetaPI < 157.5) or (TetaPI > 292.5 and TetaPI < 337.5):  # Angulos próximos a 135 ou próximos a 315 - diagonal superior esquerda e inferior direita
+                Viz1 = ImgMag[x - 1, y - 1]
+                Viz2 = ImgMag[x + 1, x + 1]
+            # 2º condiçao: Limiar adaptativo # A magnitude de x,y deve ser maior que um Limiar M | LimiarM = sum(ImgMag(x,y) * abs(Viz1 - Viz2)) / sum(abs(Viz1 - Viz2))
+            dif = np.abs(Viz1 - Viz2)
+            if (dif != 0):
+                sum1 = sum1 + (MagPI * dif)
+                sum2 = sum2 + dif
+    return (sum1 / sum2)
+
+# Recortar a imagem em 9 partes e descobrir qual o quadrante de maior magnitude média
+def MagnitudeRegiao(Img, ImgRGB, stats, ImgCC):
+    print("Cálculo da Região de Interesse através das médias da Magnitude do Gradiente por Região Possível (5 Horizontais e 3 Verticais) (86)")
+    altura = Img.shape[0]; largura = Img.shape[1]
+    alturaA = int(altura/5); larguraL = int(largura/3)
+
+    ImgQuadrantes = []
+    #Fatias na Horizontal
+    ImgQuadrantes.append(Img[0:alturaA, 0:largura])                     #0
+    ImgQuadrantes.append(Img[alturaA + 1 : alturaA * 2, 0:largura])     #1
+    ImgQuadrantes.append(Img[alturaA * 2 + 1 : alturaA * 3, 0:largura]) #2
+    ImgQuadrantes.append(Img[alturaA * 3 + 1: alturaA * 4, 0:largura])  #3
+    ImgQuadrantes.append(Img[alturaA * 4 + 1: altura, 0:largura])       #4
+
+    #Fatias na Vertical
+    ImgQuadrantes.append(Img[0:altura, 0 : larguraL])                   #5
+    ImgQuadrantes.append(Img[0:altura, larguraL + 1 : larguraL * 2])    #6
+    ImgQuadrantes.append(Img[0:altura, larguraL * 2 + 1 : largura])     #7
+
+    count1 = 0; count2 = 0; count3 = 0; count3 = 0; count4 = 0; count5 = 0; count6 = 0; count7 = 0; count8 = 0;
+    MediaMag1 = 0; MediaMag2 = 0; MediaMag3 = 0; MediaMag4 = 0; MediaMag5 = 0; MediaMag6 = 0; MediaMag7 = 0; MediaMag8 = 0;
+    SumDensity1 = 0; SumDensity2 = 0; SumDensity2 = 0; SumDensity3 = 0; SumDensity4 = 0; SumDensity5 = 0; SumDensity6 = 0; SumDensity7 = 0; SumDensity8 = 0;
+
+    for CC in stats[1:]:
+        XMin = CC[cv2.CC_STAT_TOP]; XMax = CC[cv2.CC_STAT_TOP] + CC[cv2.CC_STAT_HEIGHT]  # I inicial e final do BB
+        YMin = CC[cv2.CC_STAT_LEFT]; YMax = CC[cv2.CC_STAT_LEFT] + CC[cv2.CC_STAT_WIDTH]  # J inicial e final do BB
+        if XMin < alturaA:
+            count1 += 1
+            MediaMag1 = MediaMag1 + np.mean(Img[XMin:XMax, YMin:YMax])
+            SumDensity1 = SumDensity1 + CC[cv2.CC_STAT_AREA]
+        elif XMin > alturaA + 1 and XMin < alturaA * 2:
+            count2 += 1
+            MediaMag2 = MediaMag2 + np.mean(Img[XMin:XMax, YMin:YMax])
+            SumDensity2 = SumDensity2 + CC[cv2.CC_STAT_AREA]
+        elif XMin > alturaA * 2 + 1 and XMin < alturaA * 3:
+            count3 += 1
+            MediaMag3 = MediaMag3 + np.mean(Img[XMin:XMax, YMin:YMax])
+            SumDensity3 = SumDensity3 + CC[cv2.CC_STAT_AREA]
+        elif XMin > alturaA * 3 + 1 and XMin < alturaA * 4:
+            count4 += 1
+            MediaMag4 = MediaMag4 + np.mean(Img[XMin:XMax, YMin:YMax])
+            SumDensity4 = SumDensity4 + CC[cv2.CC_STAT_AREA]
+        elif XMin > alturaA * 4 + 1:
+            count5 += 1
+            MediaMag5 = MediaMag5 + np.mean(Img[XMin:XMax, YMin:YMax])
+            SumDensity5 = SumDensity5 + CC[cv2.CC_STAT_AREA]
+        if YMin < larguraL:
+            count6 += 1
+            MediaMag6 = MediaMag6 + np.mean(Img[XMin:XMax, YMin:YMax])
+            SumDensity6 = SumDensity6 + CC[cv2.CC_STAT_AREA]
+        elif YMin > larguraL + 1 and YMin < larguraL * 2:
+            count7 += 1
+            MediaMag7 = MediaMag1 + np.mean(Img[XMin:XMax, YMin:YMax])
+            SumDensity7 = SumDensity7 + CC[cv2.CC_STAT_AREA]
+        elif YMin > larguraL * 2 + 1:
+            count8 += 1
+            MediaMag8 = MediaMag8 + np.mean(Img[XMin:XMax, YMin:YMax])
+            SumDensity8 = SumDensity8 + CC[cv2.CC_STAT_AREA]
+    print("Counts: ", count1, count2, count3, count4, count5, count6, count7, count8)
+    print("MediasMag", MediaMag1, MediaMag2, MediaMag3, MediaMag4, MediaMag5, MediaMag6, MediaMag7, MediaMag8)
+    print("SumDensity", SumDensity1, SumDensity2, SumDensity3, SumDensity4, SumDensity5, SumDensity6, SumDensity7, SumDensity8)
+    Temp = [count1, count2, count3, count4, count5, count6, count7, count8]
+    MaxCount = Temp.index(max(Temp))
+    Temp = [MediaMag1, MediaMag2, MediaMag3, MediaMag4, MediaMag5, MediaMag6, MediaMag7, MediaMag8]
+    MaxMedia = Temp.index(max(Temp))
+    Temp = [SumDensity1, SumDensity2, SumDensity3, SumDensity4, SumDensity5, SumDensity6, SumDensity7, SumDensity8]
+    MaxDensity = Temp.index(max(Temp))
+
+    #Cria Mascara para recorte: Maior Count
+    AlturaInicial, AlturaFinal, LarguraInicial, LarguraFinal = MascaraROI(MaxCount, altura, largura)
+    ImgRGBCopy1 = ImgRGB.copy()
+    ImgMascara1 = np.zeros([altura, largura])
+    for x in range(AlturaInicial, AlturaFinal):
+        for y in range(LarguraInicial, LarguraFinal):
+            ImgMascara1[x, y] = 1
+
+    P1 = (LarguraInicial, AlturaInicial)
+    P2 = (LarguraFinal, AlturaFinal)
+    # desenha retângulos em torno do componente
+    cv2.rectangle(ImgRGBCopy1, P1, P2, (0, 0, 255), thickness=2)  # Apenas para Visualização
+    #MostraImg("ROI em Vermelho Para MaxCount", ImgRGBCopy1)
+
+    # Cria Mascara para recorte: Maior Media Mag
+    AlturaInicial, AlturaFinal, LarguraInicial, LarguraFinal = MascaraROI(MaxMedia, altura, largura)
+    ImgRGBCopy2 = ImgRGB.copy()
+    ImgMascara2 = np.zeros([altura, largura])
+    for x in range(AlturaInicial, AlturaFinal):
+        for y in range(LarguraInicial, LarguraFinal):
+            ImgMascara2[x, y] = 1
+
+    P1 = (LarguraInicial, AlturaInicial)
+    P2 = (LarguraFinal, AlturaFinal)
+    # desenha retângulos em torno do componente
+    cv2.rectangle(ImgRGBCopy2, P1, P2, (0, 0, 255), thickness=2)  # Apenas para Visualização
+    #MostraImg("ROI em Vermelho para MaxMedia", ImgRGBCopy2)
+
+    # Cria Mascara para recorte: Maior Densidade
+    AlturaInicial, AlturaFinal, LarguraInicial, LarguraFinal = MascaraROI(MaxDensity, altura, largura)
+    ImgRGBCopy3 = ImgRGB.copy()
+    ImgMascara3 = np.zeros([altura, largura])
+    for x in range(AlturaInicial, AlturaFinal):
+        for y in range(LarguraInicial, LarguraFinal):
+            ImgMascara3[x, y] = 1
+
+    P1 = (LarguraInicial, AlturaInicial)
+    P2 = (LarguraFinal, AlturaFinal)
+    # desenha retângulos em torno do componente
+    cv2.rectangle(ImgRGBCopy3, P1, P2, (0, 0, 255), thickness=2)  # Apenas para Visualização
+    #MostraImg("ROI em Vermelho para MaxDensity", ImgRGBCopy3)
+
+    cv2.imwrite(str(path + imagem + " - 5BBROIMag" + extensao), ImgRGBCopy2)
+    #cv2.imwrite(str(path + imagem + "- QuintoBBROIDensidade" + extensao), ImgRGBCopy3)
+    return(MaxCount, MaxMedia, MaxDensity)
+
+def MascaraROI(Max, altura, largura):
+    alturaA = int(altura/5); larguraL = int(largura/3)
+    if Max == 0 or Max == 1 or Max == 2 or Max == 3 or Max == 4:  # Horizontal
+        LarguraInicial = 0; LarguraFinal = largura
+        if Max == 0:
+            AlturaInicial = 0; AlturaFinal = alturaA
+        elif Max == 1:
+            AlturaInicial = alturaA + 1; AlturaFinal = alturaA * 2
+        elif Max == 2:
+            AlturaInicial = alturaA * 2 + 1; AlturaFinal = alturaA * 3
+        elif Max == 3:
+            AlturaInicial = alturaA * 3 + 1; AlturaFinal = alturaA * 4
+        else:
+            AlturaInicial = alturaA * 4 + 1; AlturaFinal = altura
+    else:
+        AlturaInicial = 0; AlturaFinal = altura
+        if Max == 5:
+            LarguraInicial = 0; LarguraFinal = larguraL
+        elif Max == 6:
+            LarguraInicial = larguraL + 1; LarguraFinal = larguraL * 2
+        else:
+            LarguraInicial = larguraL * 2 + 1; LarguraFinal = largura
+
+    return AlturaInicial, AlturaFinal, LarguraInicial, LarguraFinal
+
+def RemoveInsideCCs(stats, ImgRGB):
+    print("Remove Componentes Internos (356)")
+    NovoStats = []; NovoStats.append(stats[0])
+    for i, CC in enumerate(stats[1:], start=1):
+        A = CC[cv2.CC_STAT_TOP]; B = CC[cv2.CC_STAT_TOP] + CC[cv2.CC_STAT_HEIGHT]  # I inicial e final do BB
+        C = CC[cv2.CC_STAT_LEFT]; D = CC[cv2.CC_STAT_LEFT] + CC[cv2.CC_STAT_WIDTH]  # J inicial e final do BB
+        Flag = True
+        for CCj in stats[1:]:
+            XMin = CCj[cv2.CC_STAT_TOP]; XMax = CCj[cv2.CC_STAT_TOP] + CCj[cv2.CC_STAT_HEIGHT]  # I inicial e final do BB
+            YMin = CCj[cv2.CC_STAT_LEFT]; YMax = CCj[cv2.CC_STAT_LEFT] + CCj[cv2.CC_STAT_WIDTH]  # J inicial e final do BB
+            if A > XMin and B < XMax:
+                if C > YMin and D < YMax:
+                    #O componente i é um componente filho e não precisa ser rastreado.
+                    Flag = False
+        if Flag == True:
+            NovoStats.append(CC)
+    NovoStats = np.asarray(NovoStats)
+    ImgRGBCopy = CriaBoundingBoxes(NovoStats, ImgRGB)
+    return NovoStats, ImgRGBCopy
+
+def MSER(Img):
+    vis = Img.copy()
+    mser = cv2.MSER_create()
+    regions = mser.detectRegions(Img)
+    hulls = [cv2.convexHull(p.reshape(-1, 1, 2)) for p in regions[0]]
+    cv2.polylines(vis, hulls, 1, (0, 255, 0))
+    mask = np.zeros((Img.shape[0], Img.shape[1], 1), dtype=np.uint8)
+    for contour in hulls:
+        cv2.drawContours(mask, [contour], -1, (255, 255, 255), -1)
+
+    # this is used to find only text regions, remaining are ignored
+    text_only = cv2.bitwise_and(Img, Img, mask=mask)
+    return vis, text_only
+
+def SWT(Img, name):
+    #img_in = PIL.Image.open(name+extensao)
+    img_out = pillowfight.swt(Img, output_type=pillowfight.SWT_OUTPUT_GRAYSCALE_TEXT)
+    img_out.save(path+name+" - 7SWT"+extensao)
+
+    # SWT_OUTPUT_BW_TEXT = 0  # default
+    # SWT_OUTPUT_GRAYSCALE_TEXT = 1
+    # SWT_OUTPUT_ORIGINAL_BOXES = 2
+    #img_out = pillowfight.swt(img_in, output_type=pillowfight.SWT_OUTPUT_ORIGINAL_BOXES)
+
+
+##### =-=-=-=-=-=-=-=-=-==-=-=- MAIN =-=-=-=-=-=-===-=-=-=- ####
+#imgs = ["ImgSimples", "ImgSimples2", "ImgSimples3", "SacredVisitations", "ImgCena1", "LiuImg", "WebBorn"]
+#imgs = ["ICDAR-img_1", "ICDAR-img_2", "ICDAR-Img_3", "ICDAR-img_9", "ICDAR-img_12",
+#        "ICDAR-img_13", "ICDAR-img_46", "ICDAR-img_59", "ICDAR-img_61",
+#        "ICDAR-img_65", "ICDAR-img_73", "ICDAR-img_71", "ICDAR-img_75", "ICDAR-img_76",
+#        "ICDAR-img_80", "ICDAR-img_91", "ICDAR-img_96", "ICDAR-img_105", "ICDAR-img_106",
+#        "ICDAR-img_107", "ICDAR-img_108", "ICDAR-img_121", "ICDAR-img_125", "ICDAR-img_131",
+#        "ICDAR-img_133", "ICDAR-img_134", "ICDAR-img_135"]
+imgs = ["12YearsAsSlave", "AliceInWonderland", "AntMan", "Avatar", "Avengers", "AvengersII", "Batman", "BeyondBorders",
+        "BlackPanther", "BourneLegacy", "CapitainAmerica", "CitizenKane", "DespicableMe2", "Django", "Eclipse", "EdAstra",
+        "Frankenweenie", "Frankie", "GeminiMan", "GoodFellas", "HorribleBosses", "Hustlers", "IceAge4", "IronMan2", "It",
+        "Jexi", "Joker", "KingKong", "KillingThemSoftly", "LastStand", "LesMiserables", "Maleficent", "MeetJoeBlack", "MockingjayI",
+        "Mortdecai", "Spotlight", "StarWars", "StarWarsIV", "Super8", "Synonyms", "Tangled", "The GoodFather", "TheAviator",
+        "TheCurrentWar", "TheHangoover2", "Tintin", "Titanic", "WakingWaves", "WallE", "WonderWoman", "WorldWarZ", "XMen"]
+#imgs = ["text_img0002", "text_img0005", "text_img0008", "text_img0011", "text_img0014", "text_img0017", "text_img0020",
+#        "text_img0021", "text_img0025", "text_img0028", "text_img0031"]
 extensao = ".jpg"
-ImgRGB, ImgPB = LeImg(imgs[op]+extensao)
-Imagens.append(["RGB Original", ImgRGB])
-Imagens.append(["PB Original", ImgPB])
-#Suavização com Gaussiana: Literatura usa Gauss
-ImgRGB, ImgPB = Gaussiana(ImgRGB), Gaussiana(ImgPB)
-Imagens.append(["RGB Gauss", ImgRGB])
-Imagens.append(["PB Gauss", ImgPB])
-#Suavização com Mediana: Melhor para ruídos salt and pepper
-#ImgRGB, ImgPB = Mediana(ImgRGB), Mediana(ImgPB)
+path = "Resultados\\"
+f = open(path+"Cartazrs.txt", "w")
+f.write("Execução para Cartazes de Filmes: \n\n")
+for imagem in imgs:
+    ImgRGB, ImgPB = LeImg(imagem + extensao)
+    print(imagem)
+    f.write("Imagem: " + imagem)
+    #Filtro Mediana
+    ImgPBM = Mediana(ImgPB)
+    #MostraImg("Imagem Cinza Mediana", ImgPBM)
 
-#Conta para "quantidade ideal de cores" ?
-#qtdcores = ImgRGB.shape[0]*ImgRGB.shape[1] / ImgRGB.max()+1
+    #Edge Detection Algorithm: Usa Canny completo para detecção de bordas e Filtros de Sobel para Magnitude e Teta (pq canny usa Sobel internamente, embora Prewitt talvez seja melhor pra H e V)
+    SobelX, SobelY = Sobel(ImgPBM)
+    SobelMag = SobelX + SobelY
+    TetaSobel = Teta(SobelX, SobelY)
+    ImgCanny = Canny(ImgPBM, SobelMag)
+    #MostraImg("Canny", ImgCanny)
+    cv2.imwrite(str(path+imagem+" - 0SobelMag"+extensao), SobelMag)
+    cv2.imwrite(str(path+imagem+" - 0BordasCanny"+extensao), ImgCanny)
 
-#Quantizacao
-ImgQuant, Clusteres = Quantizacao(ImgRGB, 16)
-Imagens.append(["Quantizada", ImgQuant])
+    #Encontra os componetes conectados e os rotula ImgCC
+    #Aplica o Bounding Box de acordo com os componentes conectados e retorna a imagem "limpa", apenas com os boxes ImgBB
+    ImgCCSimple = ConnectedComponents(ImgCanny)
+    ImgCC, stats, centroids, nlabels = ConnectedComponentsStats(ImgCanny)
+    ImgRGBCopy = CriaBoundingBoxes(stats, ImgRGB)
+    cv2.imwrite(str(path+imagem+" - 1BBSimples"+extensao), ImgRGBCopy)
+    f.write("\nTotal de Componentes Conectados: " + str(nlabels))
+    #Aplica critérios de seleção e exclusão de BBs de acordo com algumas características da imagem
 
-#Histogramas
-#RGBHistograma(ImgRGB)
-#RGBHistograma(ImgQuant)
-#PBHistograma(ImgPB)
+    # Análise sobre área dos BBs: Envia as estatísticas dos CCs, que tem informação de altura, largura e etc e devolve uma nova lista de stats
+    stats, ImgRGBCopy = BBAreasSelection(stats, ImgRGB)
+    cv2.imwrite(str(path + imagem + " - 2BBAreas" + extensao), ImgRGBCopy)
+    f.write("\nTotal de Componentes Após Remoção de Regiões Não Texto - Áreas: " + str(stats.shape[0]))
+    # Remove BB inside
+    stats, ImgRGBCopy = RemoveInsideCCs(stats, ImgRGB)
+    cv2.imwrite(str(path + imagem + " - 3BBChilds" + extensao), ImgRGBCopy)
+    f.write("\nTotal de Componentes Após Redução de BB - InsideBoxes: " + str(stats.shape[0]))
+    #Análise de Densidade x Gradiente
+    stats, ImgRGBCopy = BBGradientSelection(stats, ImgRGB, SobelMag, TetaSobel, ImgCC)
+    cv2.imwrite(str(path+imagem+" - 4BBMags"+extensao), ImgRGBCopy)
+    f.write("\nTotal de Componentes Após Remoção de Regiões Não Texto - Gradiente: " + str(stats.shape[0]))
+    # Identifica o ROI de acordo com a maior média da magnitude
+    MaxCount, MaxMedia, MaxDensity = MagnitudeRegiao(SobelMag, ImgRGBCopy, stats, ImgCC)
+    f.write("\nRegião com maior contagem de BBs: " + str(MaxCount) + "; Maior Media Gradiente: " + str(MaxMedia) + "; Maior Densidade: " + str(MaxDensity))
+    #NovoStats, pesos = cv2.groupRectangles(list(stats[1:,:4]), 0, 0.)
+    #if len(NovoStats) != 0 :
+    #    cv2.imwrite(str(path + imagem + " - 6LinkingBBs" + extensao), CriaBoundingBoxes(NovoStats, ImgRGB))
 
-#Bordas: Laplace
-LapImgRGB = Laplace(ImgRGB)
-LapImgQuant = Laplace(ImgQuant)
-LapImgPB = Laplace(ImgPB)
-Imagens.append(["LaplaceRGB", LapImgRGB])
-Imagens.append(["LapaceQuantizado", LapImgQuant])
-Imagens.append(["LaplacePB", LapImgPB])
-
-#PlotaImg(Imagens, Titulos)
-
-#Bordas: Sobel
-SobelXImgRGB, SobelYImgRGB = Sobel(ImgRGB)
-SobelXYImgRGB = cv2.bitwise_or(SobelXImgRGB, SobelYImgRGB)
-Imagens.append(["SobelXRGB", SobelXImgRGB])
-Imagens.append(["SobelYRGB", SobelYImgRGB])
-Imagens.append(["SobelXYRGB", SobelXYImgRGB])
-
-SobelXImgQuant, SobelYImgQuant = Sobel(ImgQuant)
-SobelXYImgQuant = cv2.bitwise_or(SobelXImgQuant, SobelYImgQuant)
-Imagens.append(["SobelXQuant", SobelXImgQuant])
-Imagens.append(["SobelYQuant", SobelYImgQuant])
-Imagens.append(["SobelXYQuant", SobelXYImgQuant])
-
-SobelXImgPB, SobelYImgPB  = Sobel(ImgPB)
-SobelXYImgPB = cv2.bitwise_or(SobelXImgPB, SobelYImgPB)
-Imagens.append(["SobelXImgPB", SobelXImgPB])
-Imagens.append(["SobelYImgPB", SobelYImgPB])
-Imagens.append(["SobelXYImgPB", SobelXYImgPB])
-
-#Bordas: Canny
-CannyImgRGB = Canny(ImgRGB)
-CannyImgQuant = Canny(ImgQuant)
-CannyImgPB = Canny(ImgPB)
-Imagens.append(["CannyImgRGB", CannyImgRGB])
-Imagens.append(["CannyImgQuant", CannyImgQuant])
-Imagens.append(["CannyImgPB", CannyImgPB])
-
-#Bordas: Prewitt
-PrewittXImgRGB, PrewittYImgRGB = Prewitt(ImgRGB)
-PrewittXYImgRGB = cv2.bitwise_or(PrewittXImgRGB, PrewittYImgRGB)
-Imagens.append(["PrewittXImgRGB", PrewittXImgRGB])
-Imagens.append(["PrewittYImgRGB", PrewittYImgRGB])
-Imagens.append(["PrewittXYImgRGB", PrewittXYImgRGB])
-
-PrewittXImgQuant, PrewittYImgQuant = Prewitt(ImgQuant)
-PrewittXYImgQuant = cv2.bitwise_or(PrewittXImgQuant, PrewittYImgQuant)
-Imagens.append(["PrewittXImgQuant", PrewittXImgQuant])
-Imagens.append(["PrewittYImgQuant", PrewittYImgQuant])
-Imagens.append(["PrewittXYImgQuant", PrewittXYImgQuant])
-
-PrewittXImgPB, PrewittYImgPB = Prewitt(ImgPB)
-PrewittXYImgPB = cv2.bitwise_or(PrewittXImgPB, PrewittYImgPB)
-Imagens.append(["PrewittXImgPB", PrewittXImgPB])
-Imagens.append(["PrewittYImgPB", PrewittYImgPB])
-Imagens.append(["PrewittXYImgPB", PrewittXYImgPB])
-
-PlotaImgS(Imagens, Imagens)
-#Bordas Liu et al (APENAS GRADIENTE: MAGNITUDE E DIREÇÃO)
-#GmagRGB, GtetaRGB = LiuLocalization(ImgRGB)
-#GmagQuant, GtetaQuant = LiuLocalization(ImgQuant)
-#GmagPB, GtetaPB = LiuLocalization(ImgPB)
-
-#LiuLocalization2(GmagRGB, GtetaRGB)
-
-#Tesseract
-#f = open("Resultados\\Tesseract.txt","w+")
-
-#for i in range(0, len(Imagens)-1):
-    #texto = Tesseract(Imagens[i][1])
-    #titulo = Imagens[i][0]
-    #print(titulo, ": ", texto)
-    #f.write(titulo)
-    #f.write(": ")
-    #f.write(texto)
-    #f.write("\r\n\n")
-
-#f.close()
-
-'''
-print("Tesseract RGB: ", Tesseract(ImgRGB));
-print("Tesseract Quant: ", Tesseract(ImgQuant))
-print("Tesseract PB: ", Tesseract(ImgPB))
-
-print("Tesseract Laplace RGB: ", Tesseract(LapImgRGB))
-print("Tesseract Laplace Quant: ", Tesseract(LapImgQuant))
-print("Tesseract Laplace PB: ", Tesseract(LapImgPB))
-
-print("Tesseract Sobel RGB: ", Tesseract(SobelXYImgRGB))
-print("Tesseract Sobel Quant: ", Tesseract(SobelXYImgQuant))
-print("Tesseract Sobel PB: ", Tesseract(SobelXYImgPB))
-
-print("Tesseract Canny RGB: ", Tesseract(CannyImgRGB))
-print("Tesseract Canny Quant: ", Tesseract(CannyImgQuant))
-print("Tesseract Canny PB: ", Tesseract(CannyImgPB))
-
-print("Tesseract Prewitt RGB: ", Tesseract(PrewittXYImgRGB))
-print("Tesseract Prewitt Quant: ", Tesseract(PrewittXYImgQuant))
-print("Tesseract Prewitt PB: ", Tesseract(PrewittXYImgPB))'''
+    #vis, text_only = MSER(ImgPBM)
+    #cv2.imwrite(str(path + imagem + " - 8MSERImg" + extensao), vis)
+    #cv2.imwrite(str(path + imagem + " - 8MSERTextOnly" + extensao), text_only)
+    #SWT(ImgCanny, imagem)
+    f.write("\n=-=-=-=-=-=- ###### =-=-=-=-=-=-=- \n\n")
+f.close()
